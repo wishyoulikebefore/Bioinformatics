@@ -1,0 +1,11 @@
+annovar
+1）注册获得下载链接
+2）通过annotate_variation.pl 下载各种数据库
+annotate_variation.pl -downdb -webfrom annovar -buildver hg19 refGene ./humandb
+annotate_variation.pl -downdb -webfrom annovar -buildver hg19 exac03 ./humandb
+annotate_variation.pl -downdb -webfrom annovar -buildver hg19 exac03nontcga ./humandb
+
+10Xgenomics
+1）通过官网下载
+https://support.10xgenomics.com/single-cell-gene-expression/software/downloads/2.1
+https://support.10xgenomics.com/single-cell-vdj/software/downloads/2.1/
