@@ -16,3 +16,6 @@ GGAGAGTTTCCTTTCTTCTTCATTATAGAAATCACAGATGACCTGAGATGGAGCATGGCTGATCAGACACAGATG
 使得R1和R2信息可以连接起来（当然也有可能无法连接，以N代替）
 新的测序仪R2信息已经倒过来，旧的还没有（R2理论上是3'到5'）；R2信息应该配对转换回去
 
+4）R2测序质量一般比R1差
+R2测序晚于R1，会有杂质残留影响
+
