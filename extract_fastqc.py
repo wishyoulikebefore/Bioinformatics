@@ -13,26 +13,44 @@ fail if the difference between A and T, or G and C is greater than 20% in any po
 
 def parse_args():
     parser = argparse.ArgumentParser(description="提取fastqc信息")
-    parser.add_argument("-f",help="需要提取信息的文件")
+    parser.add_argument("-wd",help="work dir")
     args = parser.parse_args()
-    return args.f
+    return args.wd
+
+def process(wd):
+    os.chdir(wd)
+    data = []
+    fileList = []
+    columns = ["fail","warn","baseQ30","baseQ20","seqQ30","seqQ20"]
+    for sample_id in glob.glob("*"):
+        if os.path.isdir(sample_id):
+            print("开始处理%s" %(sample_id))
+            fileList.append("%s_R1" %(sample_id))
+            fail_item, warning_item, baseQ30, baseQ20, seqQ30, seqQ20 = decompress_and_extract("%s/%s_combined_R1_fastqc.zip" %(sample_id,sample_id))
+            data.append([fail_item,warning_item,baseQ30,baseQ20,seqQ30,seqQ20])
+            fileList.append("%s_R2" % (sample_id))
+            fail_item, warning_item, baseQ30, baseQ20, seqQ30, seqQ20 = decompress_and_extract("%s/%s_combined_R2_fastqc.zip" % (sample_id, sample_id))
+            data.append([fail_item,warning_item,baseQ30,baseQ20,seqQ30,seqQ20])
+            print("处理完成%s" %(sample_id))
+        else:
+            pass
+    matrix = pd.DataFrame(data,columns=columns,index=fileList)
+    matrix.to_csv("fastqc_outcome.csv")
 
 def decompress_and_extract(compressed_file):
+    file_name_piece = compressed_file.split("_")
     shutil.unpack_archive(compressed_file)
-    decompressed_dir = compressed_file.replace(".zip","")
+    decompressed_dir = compressed_file.split("/")[-1].replace(".zip", "")
     os.chdir(decompressed_dir)
     summary_df = pd.read_table("summary.txt",sep="\t",header=None,names=["result","indicator","fastq"],index_col=1)
     fail_item = summary_df[summary_df["result"]=="FAIL"].index.tolist()
     warning_item = summary_df[summary_df["result"]=="WARN"].index.tolist()
-    print("Fail: %s" %(fail_item))
-    print("Warn: %sd" %(warning_item))
     infoDict = get_rowNum()
-    if "Per base sequence quality" in fail_item:
-        process_base_quality(infoDict["base_quality_start"],infoDict["base_quality_rowNum"])
-    if "Per sequence quality scores" in fail_item:
-        process_sequence_quality(infoDict["sequence_quality_start"], infoDict["sequence_quality_rowNum"])
+    baseQ30,baseQ20 = process_base_quality(infoDict["base_quality_start"], infoDict["base_quality_rowNum"])
+    seqQ30,seqQ20 = process_sequence_quality(infoDict["sequence_quality_start"], infoDict["sequence_quality_rowNum"])
     os.chdir("../")
     shutil.rmtree(decompressed_dir,ignore_errors=True)
+    return fail_item,warning_item,baseQ30,baseQ20,seqQ30,seqQ20
 
 def get_rowNum():
     file_name = "fastqc_data.txt"
@@ -61,11 +79,10 @@ def process_base_quality(start_row,row_num):
     Q30_df = base_df[base_df["Median"]>=30]
     Q30_location = sum(Q30_df.index.str.contains("-"))*4 + len(Q30_df.index)
     loc_Q30_proportion = Q30_location/read_length * 100
-    print("Proportion of loc which median quality >= 30: %s%%" % (round(loc_Q30_proportion, 1)))
     Q20_df = base_df[base_df["Median"]>=20]
     Q20_location = sum(Q20_df.index.str.contains("-"))*4 + len(Q20_df.index)
     loc_Q20_proportion = Q20_location/read_length * 100
-    print("Proportion of loc which median quality >= 20: %s%%" % (round(loc_Q20_proportion, 1)))
+    return round(loc_Q30_proportion, 1),round(loc_Q20_proportion, 1)
 
 def process_sequence_quality(start_row,row_num):
     file_name = "fastqc_data.txt"
@@ -75,12 +92,11 @@ def process_sequence_quality(start_row,row_num):
     Q30_df = sequence_df[sequence_df["Quality"]>=30]
     Q30_reads = sum(Q30_df["Count"])
     seq_Q30_proportion = Q30_reads/reads_num * 100
-    print("Proportion of seq which mean quality >= 30: %s%%" % (round(seq_Q30_proportion, 1)))
     Q20_df = sequence_df[sequence_df["Quality"]>=20]
     Q20_reads = sum(Q20_df["Count"])
     seq_Q20_proportion = Q20_reads/reads_num * 100
-    print("Proportion of seq which mean quality >= 20: %s%%" % (round(seq_Q20_proportion, 1)))
+    return round(seq_Q30_proportion, 1), round(seq_Q20_proportion, 1)
 
 if  __name__ == "__main__":
-    file_name = parse_args()
-    decompress_and_extract(file_name)
+    wd = parse_args()
+    process(wd)
