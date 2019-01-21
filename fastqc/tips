@@ -1,0 +1,3 @@
+两个脚本的思路是一样的，只是具体用法不同：
+fastqc_monitor用于嵌入shell脚本中监控
+extract_fastqc用于提取fastqc结果
