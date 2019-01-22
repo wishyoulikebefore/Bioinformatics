@@ -4,11 +4,11 @@
 log_path=$1
 out_path=$2
 
-output=${out_path}/MiXCR_qc.txt
-output_for_analysis=${out_path}/MiXCR_qc_proportion.txt
+output=${out_path}/MiXCR_qc.csv
+output_for_analysis=${out_path}/MiXCR_qc_proportion.csv
 
-printf "sample_id,total reads,align success,overlapped and aligned,alignment failed no hits,alignment failed because of absence of V hits,alignment failed because of absence of J hits,no target with both V and J alignments,TRA,TRBn" >> ${output}
-printf "sample_id,align success,overlapped and aligned,alignment failed no hits,alignment failed because of absence of V hits,alignment failed because of absence of J hits,no target with both V and J alignments,TRA,TRBn" >> ${output_for_analysis}
+printf "sample_id,total reads,align success,overlapped and aligned,alignment failed no hits,alignment failed because of absence of V hits,alignment failed because of absence of J hits,no target with both V and J alignments,TRA,TRB\n" >> ${output}
+printf "sample_id,align success,overlapped and aligned,alignment failed no hits,alignment failed because of absence of V hits,alignment failed because of absence of J hits,no target with both V and J alignments,TRA,TRB\n" >> ${output_for_analysis}
 
 
 for sample_id in `ls -l ${log_path} | awk '/^d/{print $NF}'`
