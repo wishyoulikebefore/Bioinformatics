@@ -1,6 +1,7 @@
 from scipy.stats import binom
 import os
 from decimal import getcontext
+import numpy as np
 
 def cal_diversity(input_array,type):
     count_sum = input_array.sum()
