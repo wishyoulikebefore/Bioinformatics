@@ -2,8 +2,12 @@ from scipy.stats import binom
 import os
 from decimal import getcontext
 import numpy as np
+import pandas as pd
 
 def cal_diversity(input_array,type):
+    if not isinstance(input_array,pd.Series) and not isinstance(input_array,np.ndarray):
+        print("输入数据格式有误")
+        return
     count_sum = input_array.sum()
     p = input_array/count_sum
     if type == "shannon":
