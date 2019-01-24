@@ -10,7 +10,18 @@ def cal_diversity(input_array,type):
         p = input_array/count_sum
         shannon = -(p*np.log(p)).sum()
         value = np.e**shannon
-    elif type = "simpson":
+    elif type == "simpson":
         value = 1/(p**2).sum()
+    else:
+        print("Type指定有误")
+        return
     getcontext().prec = 2
-    return value    
+    return value
+
+def binom_test(m, n, fdr):
+    cum_prob = binom.pmf(range(m), n, fdr).sum()
+    if cum_prob >= 1:
+        pValue = binom.pmf(range(m, n + 1), n, fdr).sum()
+    else:
+        pValue = 1 - cum_prob
+    return pValue
