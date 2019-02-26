@@ -78,7 +78,7 @@ def cal_methylation(df, start, end):
         level = element/denominator
         return element,denominator,level
     except ZeroDivisionError:
-        return 0
+        return
 
 def cal_region_methylation_level(bed_df,data_df,data_sd,data_sn,bed_sd,bed_sn,chrList=chrList):
     split_bed(bed_df,bed_sd,bed_sn,chrList)
@@ -164,6 +164,9 @@ def slide_window(chr,start,end,chain,df,bin_length=500,bins=100):
             sectionList.append([end - bin_length + 1 - each_add * i, end - each_add * i])
     recordList = []
     for section in sectionList:
-        a, b, level = cal_methylation(filter_df, section[0], section[1])
+        try:
+            a, b, level = cal_methylation(filter_df, section[0], section[1])
+        except TypeError:
+            level = 0
         recordList.append(level)
     return recordList
