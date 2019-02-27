@@ -70,15 +70,14 @@ def cal_methylation_by_chr(_chr, data_sd, bed_sd, bed_sn, output):
 def cal_methylation(df, start, end):
     filter_df = df[(df["loc"] >= start) & (df["loc"] <= end)]
     meth_df = filter_df[filter_df["pvalue"] < 0.05]
+    element = meth_df["meth"].sum()
+    denominator = filter_df["meth"].sum() + filter_df["unmeth"].sum()
     try:
         ### 需要保留分子分母用于后续计算
-        #level = meth_df["meth"].sum() / (filter_df["meth"].sum() + filter_df["unmeth"].sum())
-        element = meth_df["meth"].sum()
-        denominator = filter_df["meth"].sum() + filter_df["unmeth"].sum()
         level = element/denominator
-        return element,denominator,level
     except ZeroDivisionError:
-        return
+        level = 0
+    return element, denominator, level
 
 def cal_region_methylation_level(bed_df,data_df,data_sd,data_sn,bed_sd,bed_sn,chrList=chrList):
     split_bed(bed_df,bed_sd,bed_sn,chrList)
@@ -164,9 +163,6 @@ def slide_window(chr,start,end,chain,df,bin_length=500,bins=100):
             sectionList.append([end - bin_length + 1 - each_add * i, end - each_add * i])
     recordList = []
     for section in sectionList:
-        try:
-            a, b, level = cal_methylation(filter_df, section[0], section[1])
-        except TypeError:
-            level = 0
+        a, b, level = cal_methylation(filter_df, section[0], section[1])
         recordList.append(level)
     return recordList
