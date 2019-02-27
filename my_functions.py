@@ -31,27 +31,28 @@ def split_bed(input_df, sd, sn, chrList=chrList):
         for _chr in chrList:
             try:
                 data = input_df[input_df["chr"] == _chr]
-                try:
-                    data = data.sort_values(by="start")
-                except:
-                    data = data.sort_values(by="loc")
-                data.to_csv("%s/%s/%s.csv" % (sd, sn, _chr))
             except KeyError:
-                pass
+                continue
+            try:
+                data = data.sort_values(by="start")
+            except KeyError:
+                data = data.sort_values(by="loc")
+            data.to_csv("%s/%s/%s.csv" % (sd, sn, _chr))
     else:
         return
 
 def split_data(input_df, wd, chrList=chrList):
     for _chr in chrList:
         try:
-            data = input_df.loc[_chr, :]
-            try:
-                data = data.sort_values(by="start")
-            except:
-                data = data.sort_values(by="loc")
-            data.to_csv("%s/temp_%s.csv" % (wd,_chr))
+            ### 避免只匹配到一行，导致by失效
+            data = input_df.loc[[_chr], :]
         except KeyError:
-            pass
+            continue
+        try:
+            data = data.sort_values(by="start")
+        except KeyError:
+            data = data.sort_values(by="loc")
+        data.to_csv("%s/temp_%s.csv" % (wd,_chr))
 
 def cal_methylation_by_chr(_chr, data_sd, bed_sd, bed_sn, output):
     try:
