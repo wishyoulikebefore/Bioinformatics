@@ -47,6 +47,7 @@ R18038617LR02-F256T     81734815        80598099        98.61%
 
 STAR --runThreadN 4 --runMode genomeGenerate --genomeDir Genome_data/star --genomeFastaFiles Genome_data/Mus_musculus_UCSC_mm10.tar.gz
 下载hg19:参考https://github.com/creggian/ucsc-hg19-fasta
+sambamba下载地址：https://github.com/biod/sambamba
 """
 -----------------------------------------------------------------------------------
 STAR_index="/mnt/database_NGS/hg19/reference/STAR_index"
@@ -67,6 +68,8 @@ ${sambamba} index -t 24 ${prefix}_sorted.bam
 
 03task_RNAQC
 涉及软件：samtools，anaconda2，bwa，seqtk，BEDTools，BLAT，picard
+---------------------------------------------------------------------------------
+picard下载：https://broadinstitute.github.io/picard/
 ----------------------------------------------------------------------------------
 CollectAlignmentSummaryMetrics="/ehpcdata/sge_software/picard/1.119/CollectAlignmentSummaryMetrics.jar"
 genome="/mnt/database_NGS/hg19/reference/hg19.p13.fa"
