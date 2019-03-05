@@ -44,6 +44,9 @@ R18038617LR02-F256T     81734815        80598099        98.61%
 转录本覆盖均一度评估
 比对区域分布（coding, UTR, intergenic, intronic,etc）
 核糖体RNA污染评估
+
+STAR --runThreadN 4 --runMode genomeGenerate --genomeDir Genome_data/star --genomeFastaFiles Genome_data/Mus_musculus_UCSC_mm10.tar.gz
+
 """
 -----------------------------------------------------------------------------------
 STAR_index="/mnt/database_NGS/hg19/reference/STAR_index"
