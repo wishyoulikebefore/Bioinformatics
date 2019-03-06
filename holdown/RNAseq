@@ -63,7 +63,7 @@ ${STAR} --genomeDir ${STAR_index} --sjdbGTFfile ${gene_annotation} --limitBAMsor
 --alignIntronMax 1000000 --alignMatesGapMax 1000000 --chimSegmentMin 15 --chimJunctionOverhangMin 15 --chimScoreMin 0 --chimScoreDropMax 20
 --chimScoreSeparation 10 --chimScoreJunctionNonGTAG -1 --quantMode TranscriptomeSAM --quantTranscriptomeBan IndelSoftclipSingleend
 --outReadsUnmapped Fastx --readFilesIn ${prefix}_R1.trimmed.fastq.gz ${prefix}_R2.trimmed.fastq.gz --readFilesCommand zcat
---outFileNamePrefix  ${prefix}.bam
+--outFileNamePrefix  ${prefix}
 ${sambamba} index -t 24 ${prefix}_sorted.bam
 
 03task_RNAQC
