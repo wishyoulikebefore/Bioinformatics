@@ -1,0 +1,630 @@
+配置文件
+------------------------------------------------------------------------------------------------
+condition.conf
+wgcid   sample  group
+R18037374LR01-F261N     R18037374LR01-F261N     R18037374LR01-F261N
+R18038615LR02-F256N     R18038615LR02-F256N     R18038615LR02-F256N
+R18037376LR02-F261T     R18037376LR02-F261T     R18037376LR02-F261T
+R18038617LR02-F256T     R18038617LR02-F256T     R18038617LR02-F256T
+
+pair.conf
+group   R18037374LR01-F261N     R18037376LR02-F261T
+group   R18038615LR02-F256N     R18038617LR02-F256T
+------------------------------------------------------------------------------------------------
+
+00fetch_fastq：软链接原始测序文件至目录
+
+01task_fastqc：质控
+涉及软件：FastqStat.jar,fastqc,skewer
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+java -Xmx5632m -jar FastqStat.jar --infastq Sample_${prefix}/${prefix}_R1.fastq.gz --level OFF > Sample_${prefix}/${prefix}_dataqc.xls
+fastqc -o . -t 2 -q ${prefix}_R1.fastq.gz ${prefix}_R2.fastq.gz   #只是出个fastq的质控文件，后面不使用
+skewer -m pe -f sanger -r 0.1 -d 0.03 -q 20 -Q 20 -l 75 -n -o ${prefix} --quiet -X -t 4 ${prefix}_R1.fastq.gz ${prefix}_R2.fastq.gz  #这步用来trim adapter,-o生成log文件
+再用pigz压缩文件
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+summary.sh
+Rscript ../script/rawDataQC.R ../condition.conf data_qc.xls
+awk '{n=split(FILENAME,path,"/");split(path[n],sample,"-trim");if(/read pairs processed/){printf sample[1]"\t"$1"\t"};if(/read pairs available; of these/){printf $1"\t"$2"\t"};if(/untrimm/){printf "\n"}}' ${wd}/Sample_*/*trimmed.log > trimStatTable.raw.xls
+sed -i -e 's/[()]//g' -e '1s/^/SampleID\tTotal_Reads\tClean_Reads\tClean_Rate\n/' trimStatTable.raw.xls
+Rscript ../script/trimBarPlot.R
+bash ../script/Base_quality_score_generator.slurm.sh ${wd}
+
+"""
+trimStatTable.raw.xls
+SampleID        Total_Reads     Clean_Reads     Clean_Rate
+R18037374LR01-F261N     94973778        93774802        98.74%
+R18037376LR02-F261T     78264388        77232390        98.68%
+R18038615LR02-F256N     84925401        83803872        98.68%
+R18038617LR02-F256T     81734815        80598099        98.61%
+"""
+
+02task_mapping
+设计软件：STAR(Accurate alignment)，sambamba(samtools功能的一个重要子集，包括视图、索引、排序、markdup和深度)
+"""
+转录本覆盖均一度评估
+比对区域分布（coding, UTR, intergenic, intronic,etc）
+核糖体RNA污染评估
+"""
+-----------------------------------------------------------------------------------
+STAR_index="/mnt/database_NGS/hg19/reference/STAR_index"
+gene_annotation="/mnt/database_NGS/hg19/gene/gencode.v19.annotation.gtf"
+sambamba="/ehpcdata/sge_software/sambamba/0.5.4/sambamba_v0.5.4"
+STAR="/ehpcdata/sge_software/STAR/STAR-2.4.2a/bin/Linux_x86_64/STAR"
+platform="ILLUMINA"
+------------------------------------------------------------------------------------
+${STAR} --genomeDir ${STAR_index} --sjdbGTFfile ${gene_annotation} --limitBAMsortRAM 40000000000 --runThreadN 24 --limitIObufferSize 500000000
+--outFilterType BySJout --outFilterMismatchNmax 999 --outFilterMismatchNoverLmax 0.04 --outFilterMultimapNmax 20 --outFilterMatchNminOverLread 0.66
+--outFilterIntronMotifs None --outSJfilterReads All --outSAMtype BAM SortedByCoordinate --outSAMunmapped Within --outSAMstrandField intronMotif
+--outSAMattrRGline ID:${prefix} SM:${prefix} PL:${platform} --alignSJoverhangMin 8 --alignSJDBoverhangMin 1 --alignIntronMin 20
+--alignIntronMax 1000000 --alignMatesGapMax 1000000 --chimSegmentMin 15 --chimJunctionOverhangMin 15 --chimScoreMin 0 --chimScoreDropMax 20
+--chimScoreSeparation 10 --chimScoreJunctionNonGTAG -1 --quantMode TranscriptomeSAM --quantTranscriptomeBan IndelSoftclipSingleend
+--outReadsUnmapped Fastx --readFilesIn ${prefix}_R1.trimmed.fastq.gz ${prefix}_R2.trimmed.fastq.gz --readFilesCommand zcat
+--outFileNamePrefix  ${prefix}.
+${sambamba} index -t 24 ${prefix}_sorted.bam
+
+03task_RNAQC
+涉及软件：samtools，anaconda2，bwa，seqtk，BEDTools，BLAT，picard
+----------------------------------------------------------------------------------
+CollectAlignmentSummaryMetrics="/ehpcdata/sge_software/picard/1.119/CollectAlignmentSummaryMetrics.jar"
+genome="/mnt/database_NGS/hg19/reference/hg19.p13.fa"
+ribsomal="/mnt/database_NGS/hg19/gene/hg19_p13_rRNA.interval"
+ref_flat="/mnt/database_NGS/hg19/gene/gencode.v19.refFlat.txt"
+CollectRnaSeqMetrics="/ehpcdata/sge_software/picard/1.119/CollectRnaSeqMetrics.jar"
+CollectInsertSizeMetrics="/ehpcdata/sge_software/picard/1.119/CollectInsertSizeMetrics.jar"
+------------------------------------------------------------------------------------
+java -Djava.io.tmpdir="." -Xmx48g -jar ${CollectAlignmentSummaryMetrics} VALIDATION_STRINGENCY=SILENT INPUT=${prefix}_sorted.bam OUTPUT=${prefix}_alignment_metrics.tsv REFERENCE_SEQUENCE=${genome}
+java -Xmx8g -jar ${CollectRnaSeqMetrics} VALIDATION_STRINGENCY=SILENT REF_FLAT=${ref_flat} RIBOSOMAL_INTERVALS=${ribsomal} STRAND_SPECIFICITY="NONE" INPUT=${prefix}_sorted.bam
+CHART_OUTPUT=${prefix}_3bias.pdf OUTPUT=${prefix}_RNA_metrics.tsv REFERENCE_SEQUENCE=${genome}
+java -jar  ${CollectInsertSizeMetrics} I=${prefix}_sorted.bam O=${prefix}.insertSize.txt H=${prefix}.insertSize.pdf
+-----------------------------------------------------------------------------------------------------------------------
+"""
+R18037374LR01-F261N_RNA_metrics.tsv
+# picard.analysis.CollectRnaSeqMetrics
+## METRICS CLASS        picard.analysis.RnaSeqMetrics
+PF_BASES        PF_ALIGNED_BASES        RIBOSOMAL_BASES CODING_BASES    UTR_BASES       INTRONIC_BASES  INTERGENIC_BASES        IGNORED_READS   CORRECT_STRAND_READS    INCORRECT_STRAND_READS  PCT_RIBOSOMAL_BASES     PCT_CODING_BASES        PCT_UTR_BASES   PCT_INTRONIC_BASES
+      PCT_INTERGENIC_BASES    PCT_MRNA_BASES  PCT_USABLE_BASES        PCT_CORRECT_STRAND_READS        MEDIAN_CV_COVERAGE      MEDIAN_5PRIME_BIAS      MEDIAN_3PRIME_BIAS      MEDIAN_5PRIME_TO_3PRIME_BIAS    SAMPLE  LIBRARY READ_GROUP
+25681288683     25286879466     123938687       5239216629      5422105666      12332549406     2169118628      0       0       0       0.004901        0.207191        0.214424        0.487705        0.08578 0.421615        0.41514 0       0.379001        0.546252        0.829499        0.688588
+## HISTOGRAM    java.lang.Integer
+normalized_position     All_Reads.normalized_coverage
+0       0.32069
+1       0.370871
+2       0.445732
+3       0.526493
+4       0.587462
+5       0.644074
+........................
+
+R18037374LR01-F261N_alignment_metrics.tsv
+# picard.analysis.CollectAlignmentSummaryMetrics
+## METRICS CLASS        picard.analysis.AlignmentSummaryMetrics
+CATEGORY        TOTAL_READS     PF_READS        PCT_PF_READS    PF_NOISE_READS  PF_READS_ALIGNED        PCT_PF_READS_ALIGNED    PF_ALIGNED_BASES        PF_HQ_ALIGNED_READS     PF_HQ_ALIGNED_BASES     PF_HQ_ALIGNED_Q20_BASES PF_HQ_MEDIAN_MISMATCHES PF_MISMATCH_RATE        PF_HQ_ERROR_RATE        PF_INDEL_RATE   MEAN_READ_LENGTH        READS_ALIGNED_IN_PAIRS  PCT_READS_ALIGNED_IN_PAIRS      BAD_CYCLES      STRAND_BALANCE  PCT_CHIMERAS    PCT_ADAPTER     SAMPLE  LIBRARY READ_GROUP
+FIRST_OF_PAIR   93774802        93774802        1       0       92602960        0.987504        12646932266     85366877        11705576621     11662629199     0       0.00145 0.001458        0.000171        136.94803       92602960        1       0       0.47036 0.000878 0.001049
+SECOND_OF_PAIR  93774802        93774802        1       0       92602960        0.987504        12639947200     85366877        11699238577     11590033910     0       0.002107        0.00212 0.000164        136.913264      92602960        1       0       0.52964 0.000878 0.000997
+PAIR    187549604       187549604       1       0       185205920       0.987504        25286879466     170733754       23404815198     23252663109     0       0.001778        0.001789        0.000167        136.930647      185205920       1       0       0.5     0.000878 0.001023
+-------------------------------------------------------------------------------------------------------------------------
+summary.sh
+summary_rna_metrics="../script/summary_rna_metrics.R"
+(find ../Sample* -name "*RNA_metrics.tsv";find ../Sample* -name "*alignment_metrics.tsv")|tr "\n" " "|xargs Rscript ${summary_rna_metrics}
+${Rscript}  ../script/transformQCTable.R RNA-seq_QCtable.xls ./
+html_report="../htmlModelReport/makeHtmlModule.py"
+python "../htmlModelReport/makeHtmlModule.py" -c "config/RNAseq.hg19.slurm.conf" -d data_deliver -m qualityControl
+python "../htmlModelReport/makeHtmlModule.py" -c "config/RNAseq.hg19.slurm.conf" -d data_deliver -m alignment
+
+04task_quantification
+"""
+基因注释
+基因表达量评估
+表达量分布统计
+"""
+涉及软件:RSEM（accurate quantification of gene and isoform expression from RNA-Seq data）
+--------------------------------------------------------------------------------------------------------------------------
+RSEM_calcuate_expression="/ehpcdata/sge_software/RSEM/RSEM-1.2.29/bin/rsem-calculate-expression"
+RSEM_ref="/mnt/database_NGS/hg19/reference/RSEM_ref/hg19" （好像是空的）
+--------------------------------------------------------------------------------------------------------------------------
+${RSEM_calcuate_expression} --bam --no-bam-output --estimate-rspd --paired-end --append-names -p 8 -time ${prefix}.transcriptome.bam ${RSEM_ref} ${prefix}
+--------------------------------------------------------------------------------------------------------------------------
+"""
+R18037376LR02-F261T.genes.results
+gene_id transcript_id(s)        length  effective_length        expected_count  TPM     FPKM
+ENSG00000000003.10_TSPAN6       ENST00000373020.4_TSPAN6-001,ENST00000494424.1_TSPAN6-002,ENST00000496771.1_TSPAN6-003  2116.60 1944.71 600.00  5.17    8.72
+ENSG00000000005.5_TNMD  ENST00000373031.4_TNMD-001,ENST00000485971.1_TNMD-002   1339.00 1167.11 3.00    0.04    0.07
+ENSG00000000419.8_DPM1  ENST00000371582.4_DPM1-005,ENST00000371583.5_DPM1-201,ENST00000371584.4_DPM1-003,ENST00000371588.5_DPM1-001,ENST00000413082.1_DPM1-004,ENST00000466152.1_DPM1-002,ENST00000494752.1_DPM1-006    1077.50 905.62  797.00  14.76   24.87
+ENSG00000000457.9_SCYL3 ENST00000367770.1_SCYL3-003,ENST00000367771.6_SCYL3-001,ENST00000367772.4_SCYL3-201,ENST00000423670.1_SCYL3-002,ENST00000470238.1_SCYL3-004     4840.94 4669.05 831.05  2.98    5.03
+
+R18037376LR02-F261T.isoforms.results
+transcript_id   gene_id length  effective_length        expected_count  TPM     FPKM    IsoPct
+ENST00000373020.4_TSPAN6-001    ENSG00000000003.10_TSPAN6       2206    2034.11 583.45  4.81    8.10    92.97
+ENST00000494424.1_TSPAN6-002    ENSG00000000003.10_TSPAN6       820     648.11  6.19    0.16    0.27    3.09
+ENST00000496771.1_TSPAN6-003    ENSG00000000003.10_TSPAN6       1025    853.11  10.37   0.20    0.34    3.94
+"""
+
+05task_DEG
+"""
+差异表达基因统计
+火山图
+"""
+-----------------------------------------------------------------------------------------------------------------------
+fdr_cut="0.05"
+fc_cut="2"
+DEG_edgeR="../script/DEG_edgeR.R"
+ctrl="R18037374LR01-F261N"
+case="R18037376LR02-F261T"
+case_idx="R18037376LR02-F261T"   ###可以输入多个，然后拆分
+ctrl_idx="R18037374LR01-F261N"   ###可以输入多个，然后拆分
+${Rscript} ${DEG_edgeR} ../summary/gene_count_mat.xls ${ctrl_idx} ${case_idx} ${ctrl} ${case} ${fc_cut} ${fdr_cut}
+### volcano plot这部分自己有python脚本
+-----------------------------------------------------------------------------------------------------------------------
+"""
+gene_count_mat.xls（应该是RSEM生成）
+EnsemblGene_GeneSymbol  R18037374LR01-F261N     R18037376LR02-F261T     R18038615LR02-F256N     R18038617LR02-F256T
+ENSG00000000003_TSPAN6  624     600     652     1307
+ENSG00000000005_TNMD    3       3       6       0
+ENSG00000000419_DPM1    779     797     690     777
+ENSG00000000457_SCYL3   857     831     1005    1113
+ENSG00000000460_C1orf112        327     381     223     379
+"""
+-----------------------------------------------------------------------------------------------------------------------------------------------------
+prefix="R18037376LR02-F261T_vs_R18037374LR01-F261N"
+gene_info="/mnt/database_NGS/hg19/gene/Homo_sapiens.gene_info.20170325"           ### 基因标准名称和其它名称   gene_id用来识别gene2go的内容
+gene_annotation="/mnt/database_NGS/hg19/gene/gencode.v19.annotation.gtf"
+anno_DEG="../script/anno_DEG.py"
+gene2go="/mnt/database_NGS/hg19/GO/gene2go.20170325"                          ### tax_id 9606对应human
+tax_id="9606"
+${python} ${anno_DEG} -i DEG_${prefix}_sig.xls -o DEG_${prefix}_sig -t ${tax_id} --gene2go ${gene2go} --gene_info ${gene_info} -g ${gene_annotation}
+${python} ${anno_DEG} -i DEG_${prefix}_all.xls -o DEG_${prefix}_all -t ${tax_id} --gene2go ${gene2go} --gene_info ${gene_info} -g ${gene_annotation}
+rm DEG_${prefix}_all*gene_list.txt    ###重要
+------------------------------------------------------------------------------------------------------------------------------------------------------
+
+06task_function_enrichment (差异表达基因的功能和通路富集分析)
+"""
+对筛选的差异基因用GO和KEGG数据库进行注释及富集分析
+柱状图和气泡图
+"""
+-----------------------
+#Pair_A1_vs_B1目录下
+BP：biological process
+MF: molecular function
+CC: cellular component
+-------------------------------------------------------------------------------------------------------------------------
+Rscript "../script/deg_GOstats_Hs.R" .                   #注释基因功能分类
+Rscript ../script/CategoryPlot.r  DEG_${prefix}_sig_up_gene_list_BP.xls DEG_${prefix}_sig_up_gene_list_MF.xls DEG_${prefix}_sig_up_gen    #绘制柱状图
+Rscript  ../script/CategoryPlot.r  DEG_${prefix}_sig_down_gene_list_BP.xls DEG_${prefix}_sig_down_gene_list_MF.xls DEG_${prefix}_sig_do
+-------------------------------------------------------------------------------------------------------------------------
+KEGGID  Pvalue  OddsRatio       ExpCount        Count   Size    Term    FDR     GeneSymbol
+size="Gene number",x="Rich factor",y="Pathway name"   Rich factor = Count/Size       Gene number = len(GeneSymbol)   Pathway name = Term
+
+df["gene_number"] = df["GeneSymbol"].str.count(",")+1
+df["rich_factor"] = df["Count"]/df["Size"]
+--------------------------------------------------------------------------------------------------------------------
+Rscript  ../script/bubble.R DEG_${prefix}_sig_down_gene_list_KEGG.xls     #前50个
+Rscript  ../script/bubble.R DEG_${prefix}_sig_up_gene_list_KEGG.xls
+perl ../script/kegg_pathway.pl -i "/mnt/database_NGS/hg19/KEGG/hsa00001.keg" -t DEG_${prefix}_sig_up_gene_list_KEGG.xls -m DEG_${prefix}_sig_down_gene_list_KEGG.xls -s "hsa"} -o DEG_${prefix}_pathway_images
+---------------------------------------------------------------------------------------------------------------------
+
+相关脚本：
+1）"../script/DEG_edgeR.R"
+-----------------------------------------------------------------------------------------------------------------------------
+library(edgeR)
+library(gridExtra)
+library(grid)
+library(scales)
+
+case <- args[5]
+ctrl <- args[4]
+fc.cut <- as.numeric(args[6])
+padj.cut <- as.numeric(args[7])
+
+count.data <- read.table(args[1], header=T, row.names=1,check.names=F)
+ctrl.idx <- unlist(strsplit(args[2], ","))
+case.idx <- unlist(strsplit(args[3], ","))
+nsample=length(c(ctrl.idx,case.idx))
+condition <- data.frame(group=c(rep(args[4], length(ctrl.idx)), rep(args[5], length(case.idx))))
+condition$group <- relevel(condition$group, ctrl)
+rownames(condition) <- c(ctrl.idx,case.idx)
+
+dge <- DGEList(counts=count.data)
+
+design <- model.matrix(~group, data=condition)
+colnames(design) <- levels(condition$group)
+# estimate library size
+dge <- calcNormFactors(dge, method='TMM')
+dge = dge[,c(ctrl.idx,case.idx)]
+dge$samples$group=condition$group
+
+keep <- rowSums(cpm(dge)>1) >= 1
+dge <- dge[keep, keep.lib.sizes=TRUE]
+
+nct <- cpm(dge, normalized.lib.sizes=TRUE)
+nct <- data.frame(round(nct, 3))
+
+if(nsample>2){
+  # esimate dispersion
+  dge <- estimateGLMCommonDisp(dge, design)
+  dge <- estimateGLMTrendedDisp(dge, design)
+  dge <- estimateGLMTagwiseDisp(dge, design)
+  # test
+  fit <- glmFit(dge, design)
+  lrt <- glmLRT(fit)
+}else{
+  print("No replicate, using empirical dispersion! BCV = 0.1")
+  if (length(args) != 8){
+    bcv <- 0.1
+  }else{
+    bcv <- as.numeric(args[8])
+  }
+  fit <- glmFit(dge, design, dispersion=bcv^2)
+  lrt <- glmLRT(fit)
+}
+# summary results
+result.table <- lrt$table
+#pvals[rowSums(count.data) == 0] <- NA
+result.table$padj <- p.adjust(result.table$PValue, method="BH")
+result.table$padj [is.na(result.table$padj )] <- 1
+result.table <- merge(nct, result.table, by='row.names')
+edrout <- data.frame(EnsemblGene_GeneSymbol=result.table$Row.names,
+                     mean_logCPM=result.table$logCPM,
+                     log2FC=result.table$logFC,
+                     pvalue=result.table$PValue,
+                     padj=result.table$padj)
+
+edrout <- cbind(edrout, result.table[,c(2:(1+nsample))])
+edrout <- edrout[order(edrout$padj), ]
+write.table(edrout, paste0('DEG_',case,'_vs_',ctrl,'_all.xls'), sep="\t", row.names=F, quote=F)
+
+result.table$sig <- (result.table$logFC > log2(fc.cut) | result.table$logFC < log2(1/fc.cut)) & result.table$padj<padj.cut
+
+edrout.sig <- subset(edrout, padj<padj.cut & (log2FC>log2(fc.cut) | log2FC<log2(1/fc.cut)))
+write.table(edrout.sig, paste0('DEG_', case, '_vs_', ctrl, '_sig.xls'), sep="\t", row.names=F, quote=F)
+edrout.sig.up <- data.frame(edrout.sig[edrout.sig$log2FC>0,]$EnsemblGene_GeneSymbol)
+edrout.sig.down <- data.frame(edrout.sig[edrout.sig$log2FC<0,]$EnsemblGene_GeneSymbol)
+write.table(edrout.sig.up, paste0('DEG_', case, '_vs_', ctrl, '_sig.up.txt'), sep="\t",col.names=F, row.names=F, quote=F)
+write.table(edrout.sig.down, paste0('DEG_', case, '_vs_', ctrl, '_sig.down.txt'), sep="\t", col.names=F, row.names=F, quote=F)
+df <- data.frame(up_regulated=nrow(edrout.sig.up), down_regulated=nrow(edrout.sig.down))
+file <- paste0('DEG_', case, '_vs_', ctrl, '_diff_stats.txt')
+cat(paste0("# Criteria for identifying DEGs: FC > ",fc.cut,' and FDR < ', padj.cut, '\n'),  file = file)
+write.table(df,file,append=T, quote=F, row.names = F)
+---------------------------------------------------------------------------------------------------------------------------------
+
+2）"../script/anno_DEG.py"
+日后自行修改
+---------------------------------------------------------------------------------------------------------------------------------
+import re
+import argparse
+
+
+def main():
+    args = parse_args()
+    gene_info_file = args.gene_info
+    gene2go_file = args.gene2go
+    gene_type_file = args.gene_anno
+    input_file = args.input
+    output_file = "%s_anno.xls"%args.output_prefix
+    tax_id = args.tax_id
+
+    gene_info = open(gene_info_file)
+    gene_anno_dict = {}
+    gene_symbol_dict = {}
+    gene_type_dict = {}
+    header=''
+
+    ### 获取基因及对应的ENSEMBL信息，可以直接存储后调用
+    """
+    学习
+                ensg = re.findall("Ensembl:ENS[A-Z]*G[0-9]+", rec[5])
+            for i in ensg:
+                gene_anno_dict[i.split(":")[1]] = rec
+     """
+    for line in gene_info:
+        if line.startswith("#"):
+            #header = line.strip("[#|\n]").split("\t")[1:16]
+            header = line.strip("[#|\n]").split("\t")
+        else:
+            rec = line.strip().split("\t")
+            if rec[0] != tax_id: continue
+            ensg = re.findall("Ensembl:ENS[A-Z]*G[0-9]+", rec[5])
+            for i in ensg:
+                gene_anno_dict[i.split(":")[1]] = rec
+            gene_symbol_dict[rec[2]] = rec
+    gene_info.close()
+
+    ### 获取ENSEMBL注释为gene，及其对应的gene_type
+    fi_gene_type = open(gene_type_file)
+    for line in fi_gene_type:
+        if line.startswith("#"):continue
+        rec = line.strip().split("\t")
+        if rec[2] == "gene":
+            ensembl = rec[8].split(";")[0].split(" ")[1].strip("\"").split(".")[0]
+            for item in rec[8].split(";"):
+                 [k,v] = item.strip().split(" ")
+                 if k=="gene_type":
+                     gene_type = v.strip("\"")
+                     gene_type_dict[ensembl] = gene_type
+                     break
+    fi_gene_type.close()
+
+    print "Loading annotation finished!"
+
+    ### 获得GeneID对应的GO_ID，GO_term和Category
+    fi_gene2go = open(gene2go_file)
+    gene2go_dict = {}
+    for line in fi_gene2go:
+        if line.startswith("#"):
+            continue
+        else:
+            rec = line.strip().split("\t")
+            if rec[0] != tax_id:
+                continue
+            if rec[1] not in gene2go_dict.keys():
+                gene2go_dict[rec[1]] = ",".join([rec[7], rec[2], rec[5]])
+            else:
+                gene2go_dict[rec[1]] = "%s;%s"%(gene2go_dict[rec[1]],",".join([rec[7], rec[2], rec[5]]))
+    fi_gene2go.close()
+    print "Loading gene2go finished!"
+
+
+    ### 基于DEG_R18037376LR02-F261T_vs_R18037374LR01-F261N_sig.xls,拆分EnsemblGene_GeneSymbol
+    fi = open(input_file)
+    fo = open(output_file,"w")
+    fo_up_gene_id = open("%s_up_gene_list.txt"%args.output_prefix, 'w')
+    fo_down_gene_id = open("%s_down_gene_list.txt"%args.output_prefix, 'w')
+    for line in fi:
+        rec = line.strip().split("\t")
+        if rec[0] == "EnsemblGene_GeneSymbol":
+            print >> fo, "%s\tEnsembl_gene_type\t%s\tGO_function"%("\t".join(rec),"\t".join(header))
+            continue
+        ensembl = rec[0].split("_")[0]
+        if len(rec[0].split("_")) == 1:
+            gene_symbol=rec[0].split("_")[0]
+        else:
+            gene_symbol = rec[0].split("_")[1]
+        if ensembl in gene_anno_dict.keys():
+            gene_id = gene_anno_dict[ensembl][1]
+            if float(rec[2]) > 0:
+                print >> fo_up_gene_id, gene_id
+            else:
+                print >> fo_down_gene_id, gene_id
+            if gene_id in gene2go_dict.keys():
+                go_anno = gene2go_dict[gene_id]
+            else:
+                go_anno = 'NA'
+            print >> fo, "%s\t%s\t%s\t%s"%("\t".join(rec),gene_type_dict[ensembl],"\t".join(gene_anno_dict[ensembl]), go_anno)
+        elif gene_symbol in gene_symbol_dict.keys():
+            gene_id = gene_symbol_dict[gene_symbol][1]
+            if float(rec[2]) > 0:
+                print >> fo_up_gene_id, gene_id
+            else:
+                print >> fo_down_gene_id, gene_id
+            if gene_id in gene2go_dict.keys():
+                go_anno = gene2go_dict[gene_id]
+            else:
+                go_anno = 'NA'
+
+            print >> fo, "%s\t%s\t%s\t%s"%("\t".join(rec),gene_type_dict[ensembl],"\t".join(gene_symbol_dict[gene_symbol]), go_anno)
+        else:
+            print >> fo, "%s\t%s"%("\t".join(rec), gene_type_dict[ensembl])
+
+    fo.close()
+    fi.close()
+
+
+def parse_args():
+    usage = 'python anno_DEG.py -i DEG_A_vs_B_sig.xls -o  DEG_A_vs_B -t 9606 --gene2go gene2go.txt --gene_info gene_info.txt -g gencode.gft'
+    parser = argparse.ArgumentParser(usage=usage)
+    parser.add_argument('-i', dest='input', required=True, help="Input matrix file. The first column are EnsemblGene_GeneSymbol")
+    parser.add_argument('-o', dest='output_prefix', required=True, help="output_prefix")
+    parser.add_argument('-t', dest='tax_id',default=9606, help="tax id for the species. 9606 for human")
+    parser.add_argument('--gene2go', dest='gene2go',required =True, help="gene2go annotation from UCSC")
+    parser.add_argument('-g', dest='gene_anno', required=True,help="Gencode annnotaion in gtf file format")
+    parser.add_argument('--gene_info', dest='gene_info', required=True,help="gene information from UCSC")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    main()
+--------------------------------------------------------------------------------------------------------------------------------------------
+args <- commandArgs(TRUE)
+if(length(args)!=1){
+	cat("Usage: Rscript 04deg_GOstats.R enrich_dir")
+	q()
+}
+cwd=args[1]
+setwd(cwd)
+
+library("org.Hs.eg.db")
+library("GO.db")
+library("GOstats")
+library("annotate")
+library(DBI)
+
+entrez_object <- org.Hs.egGO
+mapped_genes <- mappedkeys(entrez_object)
+universe <- mapped_genes
+anno="org.Hs.eg.db"
+dataset="org.Hs.eg"
+
+go_categories=c("BP","MF","CC")
+filepost="_MF.xls"
+
+for(file in dir(pattern="gene_list.txt"))
+{
+	gene <- readLines(file)
+	sample <- unlist(strsplit(file,"\\."))[1]
+
+	for(go_category in go_categories){
+		if(!any(gene %in% universe)){
+		next
+		}else{
+		params <- new("GOHyperGParams",geneIds=gene,universeGeneIds=universe,ontology=go_category,pvalueCutoff=0.01,conditional=F,testDirection="over",annotation=anno)
+		hgOver <- hyperGTest(params)
+
+		origGeneIds <- geneIds(params)
+		selected <- intersect(geneIds(params), universeGeneIds(params))
+		cat2Entrez <- categoryToEntrezBuilder(params)
+		## get the gene (Entrez ID) in the category
+		geneInCat <- lapply(as.list(summary(hgOver)[,1]),
+			function(goid) {
+			selected[selected %in% cat2Entrez[[goid]]]
+			} )
+
+		new=NULL
+		for (i in 1:length(geneInCat)){
+			symbs=getSYMBOL(geneInCat[[i]], data=dataset)
+			new=c(new,toString(as.list(symbs)))}
+
+		GeneSymbol=as.matrix(new)
+
+		gGhyp.pv <- pvalues(hgOver)
+		gGhyp.fdr <- p.adjust(gGhyp.pv, "BH")
+		FDR=as.matrix(gGhyp.fdr[1:length(geneInCat)])
+
+		addInfo=cbind(FDR,GeneSymbol)
+		colnames(addInfo)=c("FDR","GeneSymbol")
+
+		write.table(cbind(summary(hgOver),addInfo),file=paste(sample,"_",go_category,".xls",sep=""),row.names=F,quote=F,sep="\t")
+		}
+	}
+	if(!any(gene %in% universe)){
+	next
+	}else{
+	params <- new("KEGGHyperGParams",
+				geneIds=gene,
+				universeGeneIds=universe,
+				pvalueCutoff=0.1,
+				testDirection="over",
+				annotation=anno
+				)
+	hgOver <- hyperGTest(params)
+
+	origGeneIds <- geneIds(params)
+	selected <- intersect(geneIds(params), universeGeneIds(params))
+	cat2Entrez <- categoryToEntrezBuilder(params)
+	## get the gene (Entrez ID) in the category
+	geneInCat <- lapply(as.list(summary(hgOver)[,1]),
+		function(goid) {
+		selected[selected %in% cat2Entrez[[goid]]]
+		} )
+
+	new=NULL
+	for (i in 1:length(geneInCat)){
+		symbs=getSYMBOL(geneInCat[[i]], data=dataset)
+		new=c(new,toString(as.list(symbs)))}
+
+	GeneSymbol=as.matrix(new)
+
+	gGhyp.pv <- pvalues(hgOver)
+	gGhyp.fdr <- p.adjust(gGhyp.pv, "BH")
+	FDR=as.matrix(gGhyp.fdr[1:length(geneInCat)])
+
+	addInfo=cbind(FDR,GeneSymbol)
+	colnames(addInfo)=c("FDR","GeneSymbol")
+
+	write.table(cbind(summary(hgOver),addInfo),file=paste(sample,"_KEGG.xls",sep=""),row.names=F,quote=F,sep="\t")
+	}
+}
+----------------------------------------------------------------------------------------------------------------------------
+
+4）../script/CategoryPlot.r
+--------------------------------------------------------------------------------------------------------------------------
+rm(list=ls())
+
+args = commandArgs(trailingOnly=T)
+
+if(length(args) != 3){
+
+  cat(
+    "Usage:
+        Rscript categoryPlot.r BP.xls MF.xls CC.xls
+")
+  options("show.error.messages" = F)
+  stop()
+
+}
+
+BP = normalizePath(args[1])
+MF = normalizePath(args[2])
+CC = normalizePath(args[3])
+
+library(ggplot2)
+library(reshape2)
+
+read_go<-function(file,cat){
+ inputdata = read.delim(file, header=TRUE, row.names=1, check.name=F, comment.char="", quote="", sep="\t", fill=T)
+ #df = inputdata[,c(6,7)]
+ #df$FDR = -log10(df$FDR)
+ df = inputdata[,c(1,6)]
+ df$Pvalue = -log10(df$Pvalue)
+ df = df[1:10,]
+ df$category=cat
+ return(df)
+}
+
+df = rbind(read_go(BP, "Bological_Process"),
+           read_go(MF, "Molecular_Function"),
+           read_go(CC, "Cellular_Component"))
+
+df.long=melt(df)
+
+df.long$Term = factor(df.long$Term, levels=rev(df.long$Term))
+# tiff(filename="categoryPlot.tiff",width=15,height=18,units="cm",compression="lzw",bg="white",res=600);
+#remove NA values
+df.clean<-na.omit(df.long)
+
+mn<-max(nchar(as.character(df.clean$Term)))
+w=ifelse(mn<90,10,4 + 0.1*mn)
+h=ifelse(mn<90,8,w*0.1+10)
+c=ifelse(mn<90,8,12)
+ggplot(df.clean,aes(x=Term,y=value,fill=category))+geom_bar(stat="identity",aes(df.clean$Term,df.clean$value))+ylab("-log10(Pvalue)")+coord_flip()+theme(axis.title.x =element_text(size=c), axis.title.y=element_text(size=c))+theme(axis.text.x =element_text(size=c), axis.text.y=element_text(size=c))
+prefix=  gsub("_gene_list.*xls","",basename(args[1]))
+ggsave(paste0(prefix,"_GO_category_bar.pdf"), width=w, height=h)
+ggsave(paste0(prefix,"_GO_category_bar.png"), width=w, height=h)
+
+dev.off()
+--------------------------------------------------------------------------------------------------------------------------
+5）../script/bubble.R
+rm(list=ls())
+
+args = commandArgs(trailingOnly=T)
+
+if(length(args) != 1){
+
+  cat(
+    "Usage:
+    Rscript bubble.r pathway.xls
+    ")
+  options("show.error.messages" = F)
+  stop()
+
+}
+
+file = normalizePath(args[1])
+#file="DEG_DE_vs_PFG_sig_up_gene_list_KEGG.xls"
+library(ggplot2)
+library(reshape2)
+
+input = read.table(file,header=T,sep="\t",quote="")
+
+if(length(input)>50) pathway<-input[1:50,] else  pathway<-input
+
+a<-pathway$Size
+b<-pathway$Count
+
+richFactor=b/a
+
+pp = ggplot(pathway,aes(richFactor,Term))
+
+
+pp + geom_point(aes(size=Count))
+
+#Don't know how to automatically pick scale for object of type data.frame. Defaulting to continuous.
+#Error: Aesthetics must be either length 1 or the same as the data (621): size, x, y
+
+pbubble = pp + geom_point(aes(size=Count,color=-1*log10(Pvalue)))
+
+pbubble + scale_colour_gradient(low="green",high="red")
+
+pr = pbubble + scale_colour_gradient(low="green",high="red") + labs(color=expression(-log[10](Pvalue)),size="Gene number",x="Rich factor",y="Pathway name",title="Statistics of Pathway Enrichment")
+pr + theme_bw()
+prefix=  gsub("_gene_list.*xls","",basename(args[1]))
+ggsave(paste0(prefix,"_pathway_bubble.pdf"), width=10, height=8)
+ggsave(paste0(prefix,"_pathway_bubble.png"), width=10, height=8)
+------------------------------------------------------------------------------------------------------------------------------
