@@ -28,10 +28,10 @@ def draw_volcano(csv_file,padj,fc,num):
     expression_matrix = pd.read_csv(csv_file,index_col=0)
     f, ax = plt.subplots(figsize=(10, 8))
     expression_matrix["padj2"] = -np.log10(expression_matrix["padj"])
-    expression_matrix.loc[(expression_matrix["sig"] == True) & (expression_matrix["log2FC"] > 0), "type"] = "up"
-    expression_matrix.loc[(expression_matrix["sig"] == True) & (expression_matrix["log2FC"] < 0), "type"] = "down"
-    expression_matrix.loc[(expression_matrix["sig"] == False), "type"] = "normal"
-    expression_matrix["size"] = np.where(expression_matrix["sig"],8,4)
+    expression_matrix.loc[(expression_matrix["pvalue"] < 0.05) & (expression_matrix["log2FC"] > 0), "type"] = "up"
+    expression_matrix.loc[(expression_matrix["pvalue"] < 0.05) & (expression_matrix["log2FC"] < 0), "type"] = "down"
+    expression_matrix.loc[(expression_matrix["pvalue"] > 0.05), "type"] = "normal"
+    expression_matrix["size"] = np.where(expression_matrix["pvalue"]< 0.05,8,4)
     up_df_ = expression_matrix[expression_matrix["type"] == "up"].sort_values(by="log2FC",ascending=False)[:num]
     down_df_ = expression_matrix[expression_matrix["type"] == "down"].sort_values(by="log2FC",ascending=True)[:num]
     xlim = max(max(up_df_["log2FC"].abs()),max(down_df_["log2FC"].abs()))*1.1
