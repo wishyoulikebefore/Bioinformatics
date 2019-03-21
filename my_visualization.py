@@ -14,6 +14,51 @@ def spearman_scatterplot(data,var_x,var_y,xmax=0.5,xmin=-0.5,ymax=0.5,ymin=-0.5)
     ax.set(xlim=(xmin, xmax), ylim=(ymin, ymax))
     return ax
 
+def pie_chart_legend(sizes,labels,title,sn):
+    f, ax = plt.subplots()
+    patches, texts = ax.pie(sizes,startangle=180)
+    ax.legend(patches, labels, loc="best")
+    ax.axis('equal')
+    ax.set_title(title,fontdict={"size": 16, "weight": "bold"})
+    f.savefig("%s.png" %(sn),dpi=100,bbox_inches='tight')
+
+def circle(labels):
+    ### 在圆的四个象限中填充值
+    if type(labels) != list:
+        print("请输入列表")
+        return
+    if len(labels) != 4:
+        print("需要输入四个数据")
+        return
+
+    theta = np.arange(0, 2*np.pi, 0.01)
+    x = 5 * np.cos(theta)
+    y = 5 * np.sin(theta)
+
+    f,ax = plt.subplots(figsize=(8,8))
+    ax.plot(x, y,color="black")
+    ax.axis('equal')
+    ax.text(2,2,labels[0],fontsize=16,fontweight="bold")
+    ax.text(-3,2,labels[1],fontsize=16,fontweight="bold")
+    ax.text(-3,-2,labels[2],fontsize=16,fontweight="bold")
+    ax.text(2,-2,labels[3],fontsize=16,fontweight="bold")
+    ax.text(6,-1,"DMR methylation level",fontsize=16,fontweight="bold")
+    ax.text(0.5,6,"Normalized expression",fontsize=16,fontweight="bold")
+    ax.text(-0.25,6.25,"+",fontsize=16,fontweight="bold")
+    ax.text(-0.25,-6.5,"-",fontsize=32,fontweight="bold")
+    ax.text(6.25,-0.25,"+",fontsize=16,fontweight="bold")
+    ax.text(-7,-0.25,"-",fontsize=32,fontweight="bold")
+    ax.set(xlim=(-7,7),ylim=(-7,7))
+    ax.arrow(-6,0,12,0,length_includes_head=True,head_width=0.25, head_length=0.5)
+    ax.arrow(0,-6,0,12,length_includes_head=True,head_width=0.25, head_length=0.5)
+    ax.set_axis_off()
+
+def pie_chart(sizes,labels,title,sn):
+    f, ax = plt.subplots()
+    ax.pie(sizes, labels=labels, autopct='%1.1f%%', shadow=True, startangle=140, labeldistance=1.2)
+    ax.axis('equal')
+    ax.set_title(title,fontdict={"size": 16, "weight": "bold"})
+    f.savefig("%s.png" %(sn),dpi=100,bbox_inches='tight')
 
 def plot_sig(ax, xstart, xend, ystart, yend, sig):
     """
